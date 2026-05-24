@@ -1,0 +1,8 @@
+{
+  "name": "Multi-Agent Web Agency Controller",
+  "description": "Task manager and team collaboration dashboard for a programmatically orchestrated multi-agent web design agency, featuring hybrid human-agent collaboration and real-time project tracking.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
