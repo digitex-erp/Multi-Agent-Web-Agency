@@ -87,6 +87,40 @@ app.get("/api/billing/payment-instructions", async (_req, res) => {
   });
 });
 
+// --- Phase 2: Lead CRM persistence (Supabase + in-memory fallback) ---
+app.get("/api/leads", async (_req, res) => {
+  try {
+    const { listLeads, getLeadsStorageMode } = await import("./src/lib/leadsStore.ts");
+    const { leads, storage } = await listLeads();
+    res.json({ success: true, leads, storage: storage ?? getLeadsStorageMode() });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : "Failed to load leads";
+    res.status(500).json({ success: false, error: message });
+  }
+});
+
+app.post("/api/leads", async (req, res) => {
+  try {
+    const { createLead } = await import("./src/lib/leadsStore.ts");
+    const lead = await createLead(req.body);
+    res.status(201).json({ success: true, lead });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : "Failed to create lead";
+    res.status(500).json({ success: false, error: message });
+  }
+});
+
+app.put("/api/leads/:id", async (req, res) => {
+  try {
+    const { updateLead } = await import("./src/lib/leadsStore.ts");
+    const lead = await updateLead({ ...req.body, id: req.params.id });
+    res.json({ success: true, lead });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : "Failed to update lead";
+    res.status(500).json({ success: false, error: message });
+  }
+});
+
 // Prompt-driven report generator endpoint
 app.post("/api/generate-report", async (req, res) => {
   try {

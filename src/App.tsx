@@ -9,8 +9,13 @@ import ReportsPanel from './components/ReportsPanel';
 import { Network, Sparkles, TrendingUp, DollarSign, Bot, Users, Cpu } from 'lucide-react';
 import { fetchPageSpeedApiStatus } from './lib/auditClient';
 
+import { fetchLeads, saveLead } from './lib/leadsClient';
+
 export default function App() {
-  const [leads, setLeads] = useState<Lead[]>(INITIAL_LEADS);
+  const [leads, setLeads] = useState<Lead[]>([]);
+  const [leadsLoading, setLeadsLoading] = useState(true);
+  const [leadsStorage, setLeadsStorage] = useState<'supabase' | 'memory' | ''>('');
+  const [leadsError, setLeadsError] = useState<string | null>(null);
   const [team, setTeam] = useState<RemoteTeamMember[]>(TEAM_MEMBERS);
   const [logs, setLogs] = useState<AgentLog[]>(RECENT_LOGS);
   const [currentSection, setCurrentSection] = useState<string>('pipeline');
@@ -26,6 +31,35 @@ export default function App() {
     pageSpeedApiStatus: 'online',
     pageSpeedCooldownRemaining: 0,
   });
+
+  // Load leads from Express API (Supabase or in-memory fallback)
+  useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      try {
+        setLeadsLoading(true);
+        const data = await fetchLeads();
+        if (cancelled) return;
+        setLeads(data.leads);
+        setLeadsStorage(data.storage);
+        setLeadsError(null);
+      } catch (error: unknown) {
+        if (cancelled) return;
+        const message = error instanceof Error ? error.message : 'Failed to load leads';
+        console.error(message);
+        setLeads(structuredClone(INITIAL_LEADS));
+        setLeadsStorage('memory');
+        setLeadsError(message);
+      } finally {
+        if (!cancelled) setLeadsLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Poll live PageSpeed API throttle/cooldown telemetry
   useEffect(() => {
@@ -92,6 +126,9 @@ export default function App() {
 
   const handleUpdateLead = (updatedLead: Lead) => {
     setLeads(prevLeads => prevLeads.map(l => l.id === updatedLead.id ? updatedLead : l));
+    void saveLead(updatedLead).catch((error: unknown) => {
+      console.error('Failed to persist lead update:', error);
+    });
   };
 
   const handleAddLog = (newLog: AgentLog) => {
@@ -119,6 +156,21 @@ export default function App() {
 
       {/* Main Body */}
       <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8 space-y-6">
+        {leadsLoading && (
+          <div className="text-xs text-slate-500 font-mono bg-white border border-slate-200 rounded-lg px-3 py-2">
+            Loading lead pipeline…
+          </div>
+        )}
+        {!leadsLoading && leadsError && (
+          <div className="text-xs text-amber-700 font-mono bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+            CRM fallback active (in-memory): {leadsError}
+          </div>
+        )}
+        {!leadsLoading && leadsStorage === 'supabase' && (
+          <div className="text-xs text-emerald-700 font-mono bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">
+            Lead pipeline synced with Supabase.
+          </div>
+        )}
         
         {/* Quick Hub Stat cards */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">

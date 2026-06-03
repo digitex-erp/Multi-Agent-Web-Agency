@@ -4,6 +4,7 @@
  */
 import path from 'node:path';
 import fs from 'node:fs';
+import Module from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import express from 'express';
@@ -11,6 +12,19 @@ import express from 'express';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const require = createRequire(import.meta.url);
+
+/** LangGraph checkpoint expects uuid.v6(); some uuid versions on Vercel lack CJS v6. */
+const originalRequire = Module.prototype.require;
+Module.prototype.require = function patchedRequire(id) {
+  const loaded = originalRequire.apply(this, arguments);
+  if (id === 'uuid' && loaded && typeof loaded.v6 !== 'function') {
+    const v4 = loaded.v4 ?? loaded.default?.v4;
+    if (typeof v4 === 'function') {
+      return { ...loaded, v6: v4 };
+    }
+  }
+  return loaded;
+};
 
 function loadApp() {
   const serverPath = path.join(__dirname, '..', 'dist', 'server.cjs');
