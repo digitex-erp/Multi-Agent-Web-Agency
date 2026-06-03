@@ -1,6 +1,5 @@
 import express from "express";
 import path from "path";
-import { createServer as createViteServer } from "vite";
 import dotenv from "dotenv";
 import { getPageSpeedApiStatus, runPageSpeedAudit } from "./src/lib/speedAuditor.ts";
 import { runStrategicReportGraph } from "./src/agents/reportGraph.ts";
@@ -218,6 +217,7 @@ function setupProductionStatic(): void {
 async function startServer() {
   if (process.env.NODE_ENV !== "production") {
     console.log("Starting in development mode with Vite middleware... (PORT: 3000)");
+    const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
