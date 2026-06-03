@@ -1,16 +1,6 @@
 import express from "express";
 import path from "path";
 import dotenv from "dotenv";
-import { getPageSpeedApiStatus, runPageSpeedAudit } from "./src/lib/speedAuditor.ts";
-import { runStrategicReportGraph } from "./src/agents/reportGraph.ts";
-import { getNimModel } from "./src/agents/nimChatModel.ts";
-import { generateReportViaPythonAgents } from "./src/lib/pythonAgentsClient.ts";
-import { AGENCY_BILLING } from "./src/config/agencyBilling.ts";
-import {
-  formatInvoicePaymentHtml,
-  formatInvoicePaymentMarkdown,
-  formatInvoicePaymentPlainText,
-} from "./src/lib/invoicePaymentBlock.ts";
 
 dotenv.config();
 
@@ -19,19 +9,37 @@ const PORT = 3000;
 
 app.use(express.json());
 
-// REST route for health check
-app.get("/api/health", (req, res) => {
-  res.json({ status: "ok", time: new Date().toISOString() });
+function getDistPath(): string {
+  // Bundled to dist/server.cjs — static assets live in the same folder on Vercel
+  return typeof __dirname !== "undefined"
+    ? __dirname
+    : path.join(process.cwd(), "dist");
+}
+
+// REST route for health check (must stay lightweight for Vercel cold start)
+app.get("/api/health", (_req, res) => {
+  res.json({
+    status: "ok",
+    time: new Date().toISOString(),
+    runtime: process.env.VERCEL ? "vercel" : "node",
+  });
 });
 
 // Lighthouse audit engine status (throttle / cooldown telemetry)
-app.get("/api/audit/status", (_req, res) => {
-  res.json({ success: true, engine: 'lighthouse', ...getPageSpeedApiStatus() });
+app.get("/api/audit/status", async (_req, res) => {
+  try {
+    const { getPageSpeedApiStatus } = await import("./src/lib/speedAuditor.ts");
+    res.json({ success: true, engine: "lighthouse", ...getPageSpeedApiStatus() });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : "Audit status unavailable";
+    res.status(503).json({ success: false, error: message });
+  }
 });
 
 // Live Lighthouse audit (local Chrome — no Google API key)
 app.post("/api/audit", async (req, res) => {
   try {
+    const { getPageSpeedApiStatus, runPageSpeedAudit } = await import("./src/lib/speedAuditor.ts");
     const { url, strategy = "mobile" } = req.body ?? {};
 
     if (!url || typeof url !== "string") {
@@ -52,18 +60,22 @@ app.post("/api/audit", async (req, res) => {
     }
 
     return res.json({ success: true, audit, apiStatus });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("Error in /api/audit:", error);
-    return res.status(500).json({
-      success: false,
-      error: error?.message ?? "Internal server error",
-      apiStatus: getPageSpeedApiStatus(),
-    });
+    const message = error instanceof Error ? error.message : "Internal server error";
+    return res.status(500).json({ success: false, error: message });
   }
 });
 
 // Client invoice payment instructions (bank transfer / UPI — no payment gateway)
-app.get("/api/billing/payment-instructions", (_req, res) => {
+app.get("/api/billing/payment-instructions", async (_req, res) => {
+  const { AGENCY_BILLING } = await import("./src/config/agencyBilling.ts");
+  const {
+    formatInvoicePaymentHtml,
+    formatInvoicePaymentMarkdown,
+    formatInvoicePaymentPlainText,
+  } = await import("./src/lib/invoicePaymentBlock.ts");
+
   res.json({
     success: true,
     billing: AGENCY_BILLING,
@@ -78,6 +90,10 @@ app.get("/api/billing/payment-instructions", (_req, res) => {
 // Prompt-driven report generator endpoint
 app.post("/api/generate-report", async (req, res) => {
   try {
+    const { runStrategicReportGraph } = await import("./src/agents/reportGraph.ts");
+    const { getNimModel } = await import("./src/agents/nimChatModel.ts");
+    const { generateReportViaPythonAgents } = await import("./src/lib/pythonAgentsClient.ts");
+
     const { leads = [], metrics = {}, promptCustom = "" } = req.body;
 
     const formattedMetrics = JSON.stringify(metrics, null, 2);
@@ -89,7 +105,7 @@ app.post("/api/generate-report", async (req, res) => {
       heyGenStatus: l.heyGenStatus,
       heyGenCost: l.heyGenCost,
       status: l.status,
-      conversion: l.conversionStatus
+      conversion: l.conversionStatus,
     }));
 
     const systemPrompt = `You are the lead Operations Auditor and Strategic Analyst for 'Agentic Web Agency'—a digital agency completely automated by a multi-agent LangGraph orchestrator consisting of Scout, Diagnoser, Builder, Filmer, Pitcher, and Checker agents.
@@ -121,7 +137,6 @@ ${promptCustom || "None provided. Analyze general operational health and report 
 
 Please generate the Strategic Optimization & Pipeline Report based on this data.`;
 
-    // Priority 1: Python LangGraph + ChatNVIDIA orchestrator (agents/server.py)
     const pythonResult = await generateReportViaPythonAgents({
       systemPrompt,
       userPrompt: userPromptContent,
@@ -130,28 +145,26 @@ Please generate the Strategic Optimization & Pipeline Report based on this data.
     });
 
     if (pythonResult?.success && pythonResult.report) {
-      console.log(`Report from Python LangGraph (ChatNVIDIA) — ${pythonResult.model ?? 'nvidia'}`);
+      console.log(`Report from Python LangGraph (ChatNVIDIA) — ${pythonResult.model ?? "nvidia"}`);
       return res.json({
         success: true,
         report: pythonResult.report,
-        source: 'langgraph_python',
+        source: "langgraph_python",
         model: pythonResult.model ?? getNimModel(),
       });
     }
 
-    // Priority 2: TypeScript LangGraph + LangChain ChatOpenAI → Nvidia NIM
     const graphResult = await runStrategicReportGraph(systemPrompt, userPromptContent);
 
     if (graphResult.report) {
       return res.json({
         success: true,
         report: graphResult.report,
-        source: 'langgraph_ts',
+        source: "langgraph_ts",
         model: getNimModel(),
       });
     }
 
-    // Priority 3: Local fallback template
     console.log("Using local static/template report generator...");
     const fallbackReport = `## STRATEGIC OPTIMIZATION & PIPELINE REPORT
 *Generated by the Local Fallback Operations Audit Engine*
@@ -194,26 +207,25 @@ Deploying an explicit HITL stage between **Builder** and **Filmer** processes pr
 2. **Setup the Comment-to-DM trigger** on Instagram for organic inbound generation.
 3. **Pace Scout audits** to keep concurrent Lighthouse runs within safe worker limits.`;
 
-    return res.json({ success: true, report: fallbackReport, source: 'local_fallback' });
-
-  } catch (error: any) {
+    return res.json({ success: true, report: fallbackReport, source: "local_fallback" });
+  } catch (error: unknown) {
     console.error("Error generating report API:", error);
-    res.status(500).json({ success: false, error: error.message || "Internal server error" });
+    const message = error instanceof Error ? error.message : "Internal server error";
+    res.status(500).json({ success: false, error: message });
   }
 });
 
 function setupProductionStatic(): void {
-  const distPath = path.join(process.cwd(), 'dist');
+  const distPath = getDistPath();
   app.use(express.static(distPath));
-  app.get('*', (req, res, next) => {
-    if (req.path.startsWith('/api')) {
+  app.get("*", (req, res, next) => {
+    if (req.path.startsWith("/api")) {
       return next();
     }
-    res.sendFile(path.join(distPath, 'index.html'));
+    res.sendFile(path.join(distPath, "index.html"));
   });
 }
 
-// Setup Vite Dev server or serve production dist
 async function startServer() {
   if (process.env.NODE_ENV !== "production") {
     console.log("Starting in development mode with Vite middleware... (PORT: 3000)");
@@ -236,7 +248,6 @@ async function startServer() {
 export { app };
 export default app;
 
-// Vercel serverless: serve static + API via api/index.js (no app.listen)
 if (process.env.VERCEL) {
   setupProductionStatic();
 } else {
