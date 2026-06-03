@@ -1,6 +1,6 @@
 /**
  * Vercel serverless entry — loads the bundled Express app from dist/server.cjs.
- * buildCommand must run `npm run build` first (creates dist/server.cjs + static assets).
+ * Uses .cjs because package.json has "type": "module" (require() not allowed in .js).
  */
 const path = require('path');
 const fs = require('fs');
