@@ -32,25 +32,30 @@ We are aligned on the vision: a **programmatically orchestrated multi-agent web 
 
 ---
 
-## Part 1 — Current project status checklist
+## Part 1 — Operational status matrix (March 2026)
 
-What is **implemented and verified** before further Cursor sprints:
+| Agent / Module | Code today | Production connection needed |
+|----------------|------------|------------------------------|
+| **Global Dashboard / HUD** | ✅ Live metrics, cost gauges, agent log stream | Supabase realtime listener for live figures |
+| **Strategic Reporter** | ✅ `POST /api/generate-report` via LangGraph TS + Nvidia NIM | Deploy Python LangGraph (`AGENTS_PYTHON_URL` on Railway) |
+| **Scout Agent** | 🟡 Simulated lead pool (`initialData.ts`) | `POST /api/scrape-leads` → Outscraper |
+| **Diagnoser Agent** | 🟡 UI + logs; home URL Lighthouse live | Wire Lighthouse JSON to lead memory + DB |
+| **Builder Agent** | 🟡 Interactive mockup preview container | Dynamic CSS/React templates from NIM |
+| **Checker Agent** | 🟡 Simulated QA visual pass | Playwright + multimodal NIM vision loop |
+| **Filmer Agent** | 🟡 HITL UI + simulated HeyGen | HeyGen REST + webhook callback |
+| **Pitcher Agent** | 🟡 In-app outreach templates | Meta Comment-to-DM Graph API |
+| **Vercel deploy** | ✅ `/api/health` live (`api/index.js` ESM → `dist/server.cjs`) | LangGraph uuid CJS fix (see below) |
+
+### Infrastructure checklist
 
 | Area | Location | Status |
 |------|----------|--------|
-| Data schemas (leads, logs, metrics) | `src/types.ts`, `src/initialData.ts` | ✅ |
-| Unified portal header | `src/components/Header.tsx` | ✅ |
-| Operational lead manager | `src/components/LeadManager.tsx` | ✅ UI + HITL simulator |
-| Multi-page audit reports | LeadManager audit tab | ✅ Templates + **live Lighthouse on home URL** |
-| Financial metrics & ledger | `src/components/FinancialMetrics.tsx` | ✅ + bank transfer block |
-| Agent pipeline visualizer | `src/components/AgentPipeline.tsx` | ✅ LangGraph chain UI |
-| AI strategic reports | `POST /api/generate-report` | 🟡 Gemini today → **Nvidia NIM next** |
-| Express full-stack gateway | `server.ts`, `package.json` | ✅ Port 3000, Vite middleware |
-| **Lighthouse audit engine** | `src/lib/speedAuditor.ts`, `POST /api/audit` | ✅ Shipped |
-| Client invoicing config | `src/config/agencyBilling.ts`, `INVOICING.md` | ✅ |
-| Cursor standards | `.cursorrules` | ✅ |
-| GitHub repo | digitex-erp/Multi-Agent-Web-Agency | ✅ |
-| Master work list | `TODO.md` | ✅ |
+| Data schemas | `src/types.ts`, `src/initialData.ts` | ✅ |
+| LangGraph + Nvidia NIM | `src/agents/reportGraph.ts`, `agents/server.py` | 🟡 TS path — uuid ESM fix in progress |
+| Lighthouse audits | `src/lib/speedAuditor.ts`, `POST /api/audit` | ✅ Local; limited on Vercel serverless |
+| Express + Vercel | `server.ts`, `api/index.js`, `vercel.json` | ✅ Deploy green |
+| Client invoicing | `src/config/agencyBilling.ts` | ✅ |
+| Cursor handoff | `PLAN.md`, `TODO.md`, `.cursorrules` | ✅ |
 
 ---
 
@@ -131,7 +136,7 @@ From feasibility research — still on the roadmap:
 
 | Decision | Choice | Rationale |
 |----------|--------|-------------|
-| AI provider | **Nvidia NIM** | No Gemini; user adds `NVIDIA_API_KEY` on Vercel |
+| AI orchestration | **LangChain + LangGraph → Nvidia NIM** | Core agent heart; Python `ChatNVIDIA` on Railway |
 | Speed audits | **Lighthouse CLI** | Same metrics as PSI; no Google API key |
 | Database | **Supabase** (Phase 2) | Optional until persistent CRM needed |
 | Payments | **Offline only** | HDFC bank transfer / UPI on invoice PDF |
