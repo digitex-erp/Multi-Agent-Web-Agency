@@ -18,7 +18,7 @@ export default function ReportsPanel({ leads, metrics }: ReportsPanelProps) {
   const [operatorPrompt, setOperatorPrompt] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(false);
   const [reportHtml, setReportHtml] = useState<string>('');
-  const [reportSource, setReportSource] = useState<'gemini' | 'local_fallback' | ''>('');
+  const [reportSource, setReportSource] = useState<'langgraph_python' | 'langgraph_ts' | 'local_fallback' | ''>('');
 
   // Client side markdown to simple stylized JSX converter
   const parseMarkdownToJSX = (text: string) => {
@@ -113,25 +113,25 @@ export default function ReportsPanel({ leads, metrics }: ReportsPanelProps) {
         setReportHtml(data.report);
         setReportSource(data.source);
       } else {
-        throw new Error(data.error || "Failed to generate report text");
+        throw new Error(data.error || `Report failed (${response.status})`);
       }
     } catch (e: any) {
       console.error(e);
-      // Fallback in case of server side failure
+      const message = e?.message ?? 'Unknown error';
       setReportHtml(`## SYSTEM ADVISORY REPORT
-*Fallback report compiled local due to server API connection issues*
+*Could not reach LangGraph report API*
 
-### 1. Verification Error Caught
-Server endpoint was unable to make outbound calls directly. Your standard remote agency state variables are stable.
+### Error
+${message}
 
-### 2. General Ledger Margins
-Current active conversion metrics stand at **${metrics.conversionRate}%** with **${metrics.convertedClientsCount} secure client retentions**.
-- Current Monthly Recurring Revenue (MRR): **$${metrics.convertedClientsCount * 400.00}**
-- Session cost overheads: **$${metrics.totalApiSpent.toFixed(2)}**
+### What to check
+1. Latest code is **pushed to GitHub** and Vercel redeployed (not commit \`693549f\` only).
+2. Vercel env vars: \`NVIDIA_API_KEY\`, \`NVIDIA_MODEL\`, \`NODE_ENV=production\`.
+3. Open \`/api/health\` in your browser — should return JSON, not the React app.
 
-### 3. Core Strategic Advice
-- Immediately enable the **Human-in-the-Loop gateway** inside your 'Task Workspace' to lock down HeyGen render expenses.
-- Audit Chicago dental margins before dispatching social comment listeners. Code boilerplate caching reduces Builder tokens by 42%.`);
+### Pipeline snapshot (local state)
+- Conversion: **${metrics.conversionRate}%** · Clients: **${metrics.convertedClientsCount}**
+- MRR: **$${metrics.convertedClientsCount * 400}** · Session cost: **$${metrics.totalApiSpent.toFixed(2)}**`);
       setReportSource('local_fallback');
     } finally {
       setLoading(false);
@@ -260,7 +260,7 @@ Current active conversion metrics stand at **${metrics.conversionRate}%** with *
                   Reading operational leads list & ledger metrics...
                 </span>
                 <span className="text-slate-500 font-mono text-[10px] mt-1.5 block text-center">
-                  Querying models/gemini-3.5-flash with real-time agency state.
+                  Querying LangGraph agents via Nvidia NIM…
                 </span>
               </div>
             </div>

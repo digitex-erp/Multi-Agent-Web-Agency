@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { INITIAL_LEADS, TEAM_MEMBERS, RECENT_LOGS } from './initialData';
-import { Lead, AgentLog, RemoteTeamMember } from './types';
+import { Lead, AgentLog, RemoteTeamMember, SystemMetrics } from './types';
 import Header from './components/Header';
 import AgentPipeline from './components/AgentPipeline';
 import LeadManager from './components/LeadManager';
 import FinancialMetrics from './components/FinancialMetrics';
 import ReportsPanel from './components/ReportsPanel';
 import { Network, Sparkles, TrendingUp, DollarSign, Bot, Users, Cpu } from 'lucide-react';
+import { fetchPageSpeedApiStatus } from './lib/auditClient';
 
 export default function App() {
   const [leads, setLeads] = useState<Lead[]>(INITIAL_LEADS);
@@ -15,14 +16,33 @@ export default function App() {
   const [currentSection, setCurrentSection] = useState<string>('pipeline');
 
   // Core Orchestration Metrics State
-  const [metrics, setMetrics] = useState({
+  const [metrics, setMetrics] = useState<SystemMetrics>({
     scoutedLeadsCount: 42,
     convertedClientsCount: 2, // Starts with Evergreen Dental and Bistro bistro complete
     totalApiSpent: 26.50, // Scraping ($15) + Tokens ($6.50) + HeyGen Renders ($5)
     conversionRate: 4.7,
     metaHourCount: 45, // Outbound DM limit meter helper
     totalTokenUsage: 1450000, // Total token synchronize weight
+    pageSpeedApiStatus: 'online',
+    pageSpeedCooldownRemaining: 0,
   });
+
+  // Poll live PageSpeed API throttle/cooldown telemetry
+  useEffect(() => {
+    const syncPsiStatus = async () => {
+      const status = await fetchPageSpeedApiStatus();
+      if (!status) return;
+      setMetrics(prev => ({
+        ...prev,
+        pageSpeedApiStatus: status.status,
+        pageSpeedCooldownRemaining: status.cooldownRemaining,
+      }));
+    };
+
+    syncPsiStatus();
+    const interval = setInterval(syncPsiStatus, 30000);
+    return () => clearInterval(interval);
+  }, []);
 
   // Simulated running log generator for "real-time project progress tracking"
   useEffect(() => {

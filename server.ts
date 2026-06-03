@@ -1,8 +1,17 @@
 import express from "express";
 import path from "path";
 import { createServer as createViteServer } from "vite";
-import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
+import { getPageSpeedApiStatus, runPageSpeedAudit } from "./src/lib/speedAuditor.ts";
+import { runStrategicReportGraph } from "./src/agents/reportGraph.ts";
+import { getNimModel } from "./src/agents/nimChatModel.ts";
+import { generateReportViaPythonAgents } from "./src/lib/pythonAgentsClient.ts";
+import { AGENCY_BILLING } from "./src/config/agencyBilling.ts";
+import {
+  formatInvoicePaymentHtml,
+  formatInvoicePaymentMarkdown,
+  formatInvoicePaymentPlainText,
+} from "./src/lib/invoicePaymentBlock.ts";
 
 dotenv.config();
 
@@ -11,41 +20,66 @@ const PORT = 3000;
 
 app.use(express.json());
 
-// Lazy-initialized Gemini Client
-let aiInstance: GoogleGenAI | null = null;
-function getGeminiClient(): GoogleGenAI | null {
-  if (aiInstance) return aiInstance;
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey || apiKey === "MY_GEMINI_API_KEY" || apiKey.trim() === "") {
-    console.warn("GEMINI_API_KEY is not defined. Falling back to local report compilation.");
-    return null;
-  }
-  try {
-    aiInstance = new GoogleGenAI({
-      apiKey: apiKey,
-      httpOptions: {
-        headers: {
-          'User-Agent': 'aistudio-build',
-        }
-      }
-    });
-    return aiInstance;
-  } catch (error) {
-    console.error("Error creating GoogleGenAI instance:", error);
-    return null;
-  }
-}
-
 // REST route for health check
 app.get("/api/health", (req, res) => {
   res.json({ status: "ok", time: new Date().toISOString() });
+});
+
+// Lighthouse audit engine status (throttle / cooldown telemetry)
+app.get("/api/audit/status", (_req, res) => {
+  res.json({ success: true, engine: 'lighthouse', ...getPageSpeedApiStatus() });
+});
+
+// Live Lighthouse audit (local Chrome — no Google API key)
+app.post("/api/audit", async (req, res) => {
+  try {
+    const { url, strategy = "mobile" } = req.body ?? {};
+
+    if (!url || typeof url !== "string") {
+      return res.status(400).json({ success: false, error: "Missing required field: url" });
+    }
+
+    const normalizedStrategy = strategy === "desktop" ? "desktop" : "mobile";
+    const audit = await runPageSpeedAudit(url, normalizedStrategy);
+    const apiStatus = getPageSpeedApiStatus();
+
+    if (audit.source === "fallback" && audit.error) {
+      return res.status(503).json({
+        success: false,
+        error: audit.error,
+        audit,
+        apiStatus,
+      });
+    }
+
+    return res.json({ success: true, audit, apiStatus });
+  } catch (error: any) {
+    console.error("Error in /api/audit:", error);
+    return res.status(500).json({
+      success: false,
+      error: error?.message ?? "Internal server error",
+      apiStatus: getPageSpeedApiStatus(),
+    });
+  }
+});
+
+// Client invoice payment instructions (bank transfer / UPI — no payment gateway)
+app.get("/api/billing/payment-instructions", (_req, res) => {
+  res.json({
+    success: true,
+    billing: AGENCY_BILLING,
+    formatted: {
+      plainText: formatInvoicePaymentPlainText(),
+      markdown: formatInvoicePaymentMarkdown(),
+      html: formatInvoicePaymentHtml(),
+    },
+  });
 });
 
 // Prompt-driven report generator endpoint
 app.post("/api/generate-report", async (req, res) => {
   try {
     const { leads = [], metrics = {}, promptCustom = "" } = req.body;
-    const client = getGeminiClient();
 
     const formattedMetrics = JSON.stringify(metrics, null, 2);
     const leadsSummarized = leads.slice(0, 10).map((l: any) => ({
@@ -69,7 +103,7 @@ Focus your response on these core sections:
 1. EXECUTIVE SUMMARY: High-level overview of the pipeline health and conversion rates.
 2. FINANCIAL ANALYSIS: Break down the actual cost of operation ($2,360/mo actual based on token costs, HeyGen video, data harvesting) vs. the unrealistic theoretical model ($480/mo). Detail where leakages occur.
 3. CRITICAL BOTTLENECK REMEDIATIONS: 
-   - Propose solid mitigations for PageSpeed Insights API HTTP 500 errors (throttling, concurrent queue pacing, cools downs) and Meta Platform DM limits (comment-to-DM triggers vs outbound cold outreach).
+   - Propose solid mitigations for Lighthouse audit queue pacing (max concurrent workers, cooldowns) and Meta Platform DM limits (comment-to-DM triggers vs outbound cold outreach).
    - Address the 'Last 30% Problem' in Frontend Redesign builds (Vision-Feedback self-correction loops & headless screenshot validation).
 4. HUMAN-IN-THE-LOOP (HITL) WORKFLOW AUDIT: Explain how placing a human gate before HeyGen code-to-video generation cuts HeyGen costs by up to 90% and ensures pristine design quality.
 5. STRATEGIC RECOMMENDATIONS: 3 actionable items to maximize ROI and protect outreach accounts from suspensions.
@@ -88,24 +122,37 @@ ${promptCustom || "None provided. Analyze general operational health and report 
 
 Please generate the Strategic Optimization & Pipeline Report based on this data.`;
 
-    if (client) {
-      console.log("Generating report using Gemini API...");
-      const response = await client.models.generateContent({
-        model: "gemini-3.5-flash",
-        contents: userPromptContent,
-        config: {
-          systemInstruction: systemPrompt,
-          temperature: 0.7,
-        }
+    // Priority 1: Python LangGraph + ChatNVIDIA orchestrator (agents/server.py)
+    const pythonResult = await generateReportViaPythonAgents({
+      systemPrompt,
+      userPrompt: userPromptContent,
+      leads: leadsSummarized,
+      metrics,
+    });
+
+    if (pythonResult?.success && pythonResult.report) {
+      console.log(`Report from Python LangGraph (ChatNVIDIA) — ${pythonResult.model ?? 'nvidia'}`);
+      return res.json({
+        success: true,
+        report: pythonResult.report,
+        source: 'langgraph_python',
+        model: pythonResult.model ?? getNimModel(),
       });
-      
-      const reportText = response.text;
-      if (reportText) {
-        return res.json({ success: true, report: reportText, source: 'gemini' });
-      }
     }
 
-    // Default Fallback Report if Gemini is unavailable
+    // Priority 2: TypeScript LangGraph + LangChain ChatOpenAI → Nvidia NIM
+    const graphResult = await runStrategicReportGraph(systemPrompt, userPromptContent);
+
+    if (graphResult.report) {
+      return res.json({
+        success: true,
+        report: graphResult.report,
+        source: 'langgraph_ts',
+        model: getNimModel(),
+      });
+    }
+
+    // Priority 3: Local fallback template
     console.log("Using local static/template report generator...");
     const fallbackReport = `## STRATEGIC OPTIMIZATION & PIPELINE REPORT
 *Generated by the Local Fallback Operations Audit Engine*
@@ -146,7 +193,7 @@ Deploying an explicit HITL stage between **Builder** and **Filmer** processes pr
 ### 5. Tactical Next Steps
 1. **Enforce Pydantic schema validation** at LangGraph edges to avoid drift corruptions.
 2. **Setup the Comment-to-DM trigger** on Instagram for organic inbound generation.
-3. **Pace Scout audits** to keep concurrent PSI checks strictly below 16 requests.`;
+3. **Pace Scout audits** to keep concurrent Lighthouse runs within safe worker limits.`;
 
     return res.json({ success: true, report: fallbackReport, source: 'local_fallback' });
 
@@ -155,6 +202,17 @@ Deploying an explicit HITL stage between **Builder** and **Filmer** processes pr
     res.status(500).json({ success: false, error: error.message || "Internal server error" });
   }
 });
+
+function setupProductionStatic(): void {
+  const distPath = path.join(process.cwd(), 'dist');
+  app.use(express.static(distPath));
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api')) {
+      return next();
+    }
+    res.sendFile(path.join(distPath, 'index.html'));
+  });
+}
 
 // Setup Vite Dev server or serve production dist
 async function startServer() {
@@ -167,11 +225,7 @@ async function startServer() {
     app.use(vite.middlewares);
   } else {
     console.log("Starting in production mode (PORT: 3000)");
-    const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
-    app.get('*', (req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
-    });
+    setupProductionStatic();
   }
 
   app.listen(PORT, "0.0.0.0", () => {
@@ -179,4 +233,12 @@ async function startServer() {
   });
 }
 
-startServer();
+export { app };
+export default app;
+
+// Vercel serverless: serve static + API via api/index.js (no app.listen)
+if (process.env.VERCEL) {
+  setupProductionStatic();
+} else {
+  void startServer();
+}

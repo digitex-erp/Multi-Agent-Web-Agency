@@ -249,4 +249,6 @@ This repository's dashboard (`Multi-Agent Web Agency Controller`) is the operato
 ## Related Documentation
 
 - [README.md](./README.md) — Setup, tech stack, and current implementation status
+- [TODO.md](./TODO.md) — Master work list and phased production roadmap
+- [PLAN.md](./PLAN.md) — Cursor.ai handoff blueprint and Composer prompts
 - [GitHub Repository](https://github.com/digitex-erp/Multi-Agent-Web-Agency)

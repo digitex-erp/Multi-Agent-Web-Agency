@@ -12,7 +12,7 @@ This project implements the control panel for an automated web agency built arou
 
 | Agent | Role |
 |---|---|
-| **Scout** | Harvest local business leads; run PageSpeed Insights audits |
+| **Scout** | Harvest local business leads; run **Lighthouse** performance audits |
 | **Diagnoser** | Generate personalized 3-problem consulting audits |
 | **Builder** | Compile React/Next.js redesigns via Lovable / v0 |
 | **Checker** | Playwright QA + Vision-Feedback self-correction loops |
@@ -25,6 +25,7 @@ Key design principles from the original feasibility study:
 - **Inbound-led outreach** (Comment-to-DM) — not unsolicited cold DMs
 - **Realistic budget:** ~$2,360/mo at 1,000 leads (not the claimed $480/mo)
 - **No payment gateway** — client billing handled offline ($400/mo retainer model)
+- **Invoices:** Bank transfer / UPI details in [INVOICING.md](./INVOICING.md) · Ledger tab shows copy-ready details
 
 For the full feasibility study, financial model, premortem analysis, and hardened architecture blueprint, see **[PROJECT-CONCEPT.md](./PROJECT-CONCEPT.md)**.
 
@@ -37,10 +38,12 @@ For the full feasibility study, financial model, premortem analysis, and hardene
 | Operator dashboard (Pipeline / Leads / Ledger / AI Reports) | ✅ UI complete |
 | Simulated agent activity & live log stream | ✅ Demo behavior |
 | HITL approve → HeyGen → outreach workflow | ✅ UI simulation |
-| Gemini strategic reports (`POST /api/generate-report`) | ✅ Live integration |
-| LangGraph orchestrator + Python agents | ⏳ Pending |
-| Real lead scraping, PSI API, HeyGen, Meta Graph | ⏳ Pending |
+| Gemini strategic reports (`POST /api/generate-report`) | ✅ **LangGraph** (Python `ChatNVIDIA` → TS LangGraph → fallback) |
+| **Lighthouse** live audits (`POST /api/audit`) | ✅ No Google API key required |
+| LangGraph orchestrator + Python agents | 🟡 **Core** — Diagnoser → Auditor live; full Scout→Pitcher pipeline next |
+| Real lead scraping, HeyGen, Meta Graph | ⏳ Pending |
 | Database persistence (Supabase) | ⏳ Pending |
+| PDF audit export · SEO JSON-LD schema | ⏳ Pending |
 | Payment gateway | ❌ Not planned |
 
 ---
@@ -48,15 +51,19 @@ For the full feasibility study, financial model, premortem analysis, and hardene
 ## Tech Stack
 
 - **Frontend:** React 19, TypeScript, Vite 6, Tailwind CSS 4, Lucide icons
-- **Backend:** Express 4 (port 3000), Gemini API (`gemini-3.5-flash`)
-- **Target orchestration:** LangGraph (Python) — not yet integrated
-- **Target persistence:** Supabase — referenced in concept, not yet wired
+- **Backend:** Express 4 (port 3000)
+- **Speed audits:** Lighthouse CLI + headless Chrome (local, no Google key)
+- **AI orchestration (core):** **LangChain + LangGraph**
+  - **Python:** `agents/server.py` — `ChatNVIDIA` from `langchain-nvidia-ai-endpoints` (primary)
+  - **TypeScript:** `src/agents/reportGraph.ts` — LangGraph on Vercel when Python service is unavailable
+  - **Model:** Nvidia NIM via `NVIDIA_API_KEY`
+- **Target persistence:** Supabase — optional until Phase 2
 
 ---
 
 ## Run Locally
 
-**Prerequisites:** Node.js 18+
+**Prerequisites:** Node.js 18+ · **Google Chrome** installed (for Lighthouse audits)
 
 1. Install dependencies:
 
@@ -64,13 +71,24 @@ For the full feasibility study, financial model, premortem analysis, and hardene
    npm install
    ```
 
-2. Create a `.env` file (copy from `.env.example`) and set your Gemini API key:
+2. Create a `.env` file (copy from `.env.example`):
 
    ```env
-   GEMINI_API_KEY="your-gemini-api-key-here"
+   NVIDIA_API_KEY="nvapi-..."
+   AGENTS_PYTHON_URL="http://localhost:8001"   # optional — Python LangGraph heart
    ```
 
-3. Start the development server:
+   Lighthouse audits work **without any API key**. For full LangChain orchestration, run the Python agents service (see [agents/README.md](./agents/README.md)).
+
+3. *(Recommended)* Start the Python LangGraph orchestrator:
+
+   ```bash
+   cd agents
+   pip install -r requirements.txt
+   uvicorn server:app --port 8001
+   ```
+
+4. Start the development server:
 
    ```bash
    npm run dev
@@ -101,7 +119,10 @@ NODE_ENV=production npm start
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/api/health` | Health check |
-| `POST` | `/api/generate-report` | Generate strategic pipeline report (Gemini or local fallback) |
+| `GET` | `/api/audit/status` | Lighthouse engine throttle/cooldown telemetry |
+| `POST` | `/api/audit` | Live Lighthouse audit (Chrome required, no Google key) |
+| `POST` | `/api/generate-report` | Strategic pipeline report via **LangGraph** (Python → TS → fallback) |
+| `GET` | `/api/billing/payment-instructions` | Bank transfer / UPI details for client invoices (JSON + formatted blocks) |
 
 ---
 
@@ -109,10 +130,15 @@ NODE_ENV=production npm start
 
 | Variable | Required | Description |
 |---|---|---|
-| `GEMINI_API_KEY` | Yes (for live AI reports) | Google Gemini API key |
+| `NVIDIA_API_KEY` | For AI (Vercel + agents) | Nvidia NIM — powers LangChain `ChatNVIDIA` / TS LangGraph |
+| `NVIDIA_MODEL` | Optional | Default `meta/llama-3.1-8b-instruct` |
+| `AGENTS_PYTHON_URL` | Recommended | URL of Python LangGraph service (e.g. `http://localhost:8001`) |
+| `CHROME_PATH` | Optional | Chrome binary for Lighthouse on Linux servers |
 | `NODE_ENV` | Production only | Set to `production` for static file serving |
-| `DISABLE_HMR` | Optional | Set to `true` to disable Vite HMR (AI Studio) |
-| `APP_URL` | Optional | Documented in `.env.example`; not yet used in code |
+| `APP_URL` | Vercel deploy | Production URL for webhooks |
+| `DISABLE_HMR` | Optional | Set to `true` to disable Vite HMR |
+
+**Not used:** ~~`GEMINI_API_KEY`~~ · ~~`PAGESPEED_API_KEY`~~ (Lighthouse replaces Google PSI)
 
 ---
 
@@ -126,6 +152,10 @@ https://ai.studio/apps/2b70c44f-340d-4c1f-9d48-f53adfbb73ce
 ## Documentation
 
 - **[PROJECT-CONCEPT.md](./PROJECT-CONCEPT.md)** — Full feasibility study, financial ledger, premortem, and hardened architecture blueprint (original project concept)
+- **[PLAN.md](./PLAN.md)** — Cursor.ai handoff blueprint, Composer prompts, sprint order
+- **[TODO.md](./TODO.md)** — Master work list, Miro-style phased roadmap
+- **[INVOICING.md](./INVOICING.md)** — Client invoice bank transfer / UPI details
+- **[DEPLOYMENT.md](./DEPLOYMENT.md)** — Vercel env vars (`NVIDIA_API_KEY`) and Lighthouse notes
 
 ---
 

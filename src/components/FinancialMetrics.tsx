@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
-import { Target, TrendingDown, DollarSign, Cpu, BarChart3, AlertOctagon, HelpCircle, ShieldCheck, PlayCircle, ToggleLeft, ToggleRight } from 'lucide-react';
+import { Target, TrendingDown, DollarSign, Cpu, BarChart3, AlertOctagon, HelpCircle, ShieldCheck, PlayCircle, ToggleLeft, ToggleRight, Landmark, Copy, Check } from 'lucide-react';
 import { FINANCIAL_BREAKDOWN, TARGET_BUDGET, EMPIRICAL_BUDGET } from '../initialData';
+import { AGENCY_BILLING } from '../config/agencyBilling';
+import { formatInvoicePaymentPlainText } from '../lib/invoicePaymentBlock';
 
 interface FinancialMetricsProps {
   metrics: {
@@ -15,6 +17,14 @@ interface FinancialMetricsProps {
 
 export default function FinancialMetrics({ metrics }: FinancialMetricsProps) {
   const [useHITLAdjuster, setUseHITLAdjuster] = useState<boolean>(true);
+  const [copiedPayment, setCopiedPayment] = useState(false);
+  const bank = AGENCY_BILLING.bankTransfer;
+
+  const copyPaymentDetails = async () => {
+    await navigator.clipboard.writeText(formatInvoicePaymentPlainText());
+    setCopiedPayment(true);
+    setTimeout(() => setCopiedPayment(false), 2000);
+  };
 
   // Cost calculations
   const theoreticalTotal = TARGET_BUDGET;
@@ -243,6 +253,46 @@ export default function FinancialMetrics({ metrics }: FinancialMetricsProps) {
             </div>
           </div>
         </div>
+      </div>
+
+      {/* Client invoice — bank transfer (offline billing, no payment gateway) */}
+      <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-xs">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+          <div className="flex items-center gap-2">
+            <Landmark className="h-5 w-5 text-emerald-600" />
+            <div>
+              <h3 className="text-sm font-bold text-slate-800">Client invoice — bank transfer details</h3>
+              <p className="text-[11px] text-slate-500 mt-0.5">
+                Embedded on invoice PDFs · NEFT / RTGS / IMPS / UPI · no payment gateway
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={copyPaymentDetails}
+            className="cursor-pointer flex items-center gap-1.5 text-[11px] font-mono font-bold px-3 py-2 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 transition"
+          >
+            {copiedPayment ? <Check className="h-3.5 w-3.5 text-emerald-600" /> : <Copy className="h-3.5 w-3.5" />}
+            {copiedPayment ? 'Copied' : 'Copy for invoice'}
+          </button>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 text-xs">
+          {[
+            ['Account holder', bank.accountHolder],
+            ['Account number', bank.accountNumber],
+            ['IFSC', bank.ifsc],
+            ['Bank / branch', `${bank.bankName} · ${bank.branch}`],
+            ['Account type', bank.accountType],
+            ['MMID', bank.mmid],
+            ['UPI (VPA)', bank.upiVpa],
+          ].map(([label, value]) => (
+            <div key={label} className="bg-slate-50 border border-slate-100 rounded-lg px-3 py-2.5">
+              <span className="text-[10px] font-mono uppercase text-slate-400 block">{label}</span>
+              <span className="font-semibold text-slate-800 font-mono text-[11px] mt-0.5 block break-all">{value}</span>
+            </div>
+          ))}
+        </div>
+        <p className="text-[10px] text-slate-500 mt-3 font-mono">{AGENCY_BILLING.paymentInstructions}</p>
       </div>
     </div>
   );

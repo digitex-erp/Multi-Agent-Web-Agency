@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
 import { Lead, Comment, RemoteTeamMember, AgentLog } from '../types';
+import { fetchLivePageSpeedAudit } from '../lib/auditClient';
+import type { PageSpeedAuditResult } from '../lib/auditTypes';
 import { Search, Filter, ShieldCheck, PlayCircle, Eye, Code, Send, User, Bot, AlertCircle, PlusCircle, Check, ArrowUpRight, HelpCircle, Laptop, Smartphone, Activity, Gauge, RefreshCw, Layers, ChevronRight, CheckCircle2, Sparkles, Terminal } from 'lucide-react';
 
 interface LeadManagerProps {
@@ -23,6 +25,8 @@ export default function LeadManager({ leads, team, onUpdateLead, onAddLog, onUpd
   const [scanRunningPage, setScanRunningPage] = useState<string | null>(null);
   const [scanLogs, setScanLogs] = useState<string[]>([]);
   const [scannedPages, setScannedPages] = useState<{[key: string]: boolean}>({});
+  const [liveAuditsByLead, setLiveAuditsByLead] = useState<Record<string, PageSpeedAuditResult>>({});
+  const [auditMode, setAuditMode] = useState<'live' | 'simulated'>('simulated');
   
   // States of clicking individual Friction / Fix rows for detailed popups or slide-open panel audits
   const [selectedFrictionIdx, setSelectedFrictionIdx] = useState<number | null>(null);
@@ -205,10 +209,11 @@ export function ResponsiveContact() {
     };
   };
 
-  const runPageSimulation = (pageKey: 'home' | 'booking' | 'services' | 'contact') => {
+  const runSimulatedPageScan = (pageKey: 'home' | 'booking' | 'services' | 'contact') => {
     if (scanRunningPage) return;
     setScanRunningPage(pageKey);
     setScanLogs([]);
+    setAuditMode('simulated');
     
     const logsPool = [
       `[AI DIAGNOSER] Spawning headless browser diagnostics container for ${selectedLead.businessName}...`,
@@ -241,6 +246,68 @@ export function ResponsiveContact() {
         });
       }
     }, 450);
+  };
+
+  const runPageAudit = async (pageKey: 'home' | 'booking' | 'services' | 'contact') => {
+    if (scanRunningPage || !selectedLead) return;
+
+    if (pageKey !== 'home') {
+      runSimulatedPageScan(pageKey);
+      return;
+    }
+
+    setScanRunningPage(pageKey);
+    setScanLogs([
+      `[SCOUT] Launching local Lighthouse audit for ${selectedLead.website}...`,
+      `[LIGHTHOUSE] Strategy: mobile · queue active (no Google API key)...`,
+    ]);
+
+    const result = await fetchLivePageSpeedAudit(selectedLead.website, 'mobile');
+
+    if (result.success && result.audit?.source === 'live') {
+      const audit = result.audit;
+      setLiveAuditsByLead(prev => ({ ...prev, [selectedLead.id]: audit }));
+      setAuditMode('live');
+
+      const opportunityTitles = audit.opportunities.slice(0, 3).map(o => o.title);
+      const updatedLead: Lead = {
+        ...selectedLead,
+        originalPageSpeed: audit.performanceScore,
+        accessibilityScore: audit.accessibilityScore,
+        auditIssues: opportunityTitles.length > 0
+          ? opportunityTitles
+          : selectedLead.auditIssues,
+        status: selectedLead.status === 'scouted' ? 'diagnosed' : selectedLead.status,
+      };
+      onUpdateLead(updatedLead);
+
+      setScanLogs(prev => [
+        ...prev,
+        `[LIGHTHOUSE] Performance: ${audit.performanceScore} · Accessibility: ${audit.accessibilityScore} · SEO: ${audit.seoScore}`,
+        `[CORE-VITALS] FCP ${audit.fcp} · LCP ${audit.lcp} · CLS ${audit.cls} · TBT ${audit.tbt}`,
+        `[SUCCESS] Live Lighthouse audit complete for ${selectedLead.website}`,
+      ]);
+      setScannedPages(prev => ({ ...prev, [pageKey]: true }));
+      onAddLog({
+        id: "log_audit_live_" + Date.now(),
+        agentName: "Scout Agent",
+        action: `Live Lighthouse audit completed for ${selectedLead.businessName}.`,
+        status: "success",
+        timestamp: new Date().toLocaleTimeString(),
+        details: `Performance ${audit.performanceScore} · FCP ${audit.fcp} · CLS ${audit.cls} · Source: Lighthouse CLI`,
+      });
+    } else {
+      setScanLogs(prev => [
+        ...prev,
+        `[WARN] Live audit unavailable: ${result.error ?? 'Unknown error'}`,
+        `[FALLBACK] Running simulated multi-page diagnosis scan...`,
+      ]);
+      setScanRunningPage(null);
+      runSimulatedPageScan(pageKey);
+      return;
+    }
+
+    setScanRunningPage(null);
   };
 
   const filteredLeads = leads.filter(l => {
@@ -758,8 +825,20 @@ export default function RedesignedLanding() {
             {activeInspectorTab === 'audit' && (() => {
               const pagesAudit = getPagesAuditData(selectedLead);
               if (!pagesAudit) return null;
-              
-              const activePageData = pagesAudit[selectedPage];
+
+              const liveAudit = liveAuditsByLead[selectedLead.id];
+              const basePageData = pagesAudit[selectedPage];
+              const activePageData = selectedPage === 'home' && liveAudit?.source === 'live'
+                ? {
+                    ...basePageData,
+                    score: liveAudit.performanceScore,
+                    fcp: liveAudit.fcp,
+                    cls: liveAudit.cls,
+                    issues: liveAudit.opportunities.length > 0
+                      ? liveAudit.opportunities.map(o => `${o.title}${o.displayValue ? ` (${o.displayValue})` : ''}`)
+                      : basePageData.issues,
+                  }
+                : basePageData;
               
               return (
                 <div className="space-y-6">
@@ -770,6 +849,11 @@ export default function RedesignedLanding() {
                         <span className="text-xs font-mono bg-indigo-50 text-indigo-700 px-2.5 py-1 rounded border border-indigo-200/60 font-bold uppercase tracking-wider">
                           Autonomous Auditor Suite
                         </span>
+                        {auditMode === 'live' && liveAudit?.source === 'live' ? (
+                          <span className="text-[10px] font-mono bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded border border-emerald-200 font-bold uppercase">
+                            Live Lighthouse
+                          </span>
+                        ) : null}
                         <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
                       </div>
                       <h3 className="text-sm font-bold text-slate-800 font-sans tracking-tight mt-1.5">
@@ -873,7 +957,7 @@ export default function RedesignedLanding() {
                           </div>
 
                           <button
-                            onClick={() => runPageSimulation(selectedPage)}
+                            onClick={() => runPageAudit(selectedPage)}
                             disabled={scanRunningPage !== null}
                             className={`cursor-pointer text-[11px] font-mono font-bold px-3 py-1.5 rounded transition flex items-center gap-1.5 shadow-xs ${
                               scanRunningPage === selectedPage
@@ -882,7 +966,13 @@ export default function RedesignedLanding() {
                             }`}
                           >
                             <RefreshCw className={`h-3 w-3 ${scanRunningPage === selectedPage ? 'animate-spin' : ''}`} />
-                            <span>{scanRunningPage === selectedPage ? "Scanning Browser DOM..." : "Run Simulated Page Diagnosis Scan"}</span>
+                            <span>
+                              {scanRunningPage === selectedPage
+                                ? "Scanning..."
+                                : selectedPage === 'home'
+                                  ? "Run Live Lighthouse Audit"
+                                  : "Run Simulated Page Diagnosis Scan"}
+                            </span>
                           </button>
                         </div>
 

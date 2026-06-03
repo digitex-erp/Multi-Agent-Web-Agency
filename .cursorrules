@@ -1,0 +1,43 @@
+# Multi-Agent Web Agency Controller — Cursor Rules
+
+## Project Identity
+- **Name:** Multi-Agent Web Agency Controller
+- **Repo:** https://github.com/digitex-erp/Multi-Agent-Web-Agency
+- **Vision:** [PROJECT-CONCEPT.md](./PROJECT-CONCEPT.md)
+- **Work list:** [TODO.md](./TODO.md) · **Cursor blueprint:** [PLAN.md](./PLAN.md)
+- **No payment gateway** — billing is offline ($400/mo retainer model)
+
+## Technical Stack
+- **Language:** TypeScript (strict interfaces, explicit types)
+- **Frontend:** React 19, Vite 6, Tailwind CSS 4, motion/react, lucide-react only (no custom SVGs)
+- **Backend:** Express 4 on port 3000, tsx for dev, esbuild bundle for prod
+- **AI:** **LangGraph** orchestration — Python `ChatNVIDIA` (primary) + TypeScript LangGraph (fallback on Vercel)
+- **Audits:** Lighthouse CLI + Chrome — no Google PageSpeed API key
+- **Target DB:** Supabase PostgreSQL (not yet wired)
+- **Target orchestration:** LangGraph Python (not yet wired)
+
+## Typography
+- UI: Inter (sans)
+- Headings: Space Grotesk
+- Metrics / logs: JetBrains Mono
+
+## Architecture Rules
+- Keep UI modular — avoid bloating App.tsx or single 1000+ line files when refactoring
+- External API calls **only** in Express routes or `src/lib/*` services imported by server.ts
+- Never expose API keys in client bundles
+- Replace hardcoded mock data with database services as TODO phases complete
+- HITL gates must block HeyGen and outreach until human approval
+- Outreach must use Comment-to-DM (Meta Graph) or SMTP — never unsolicited cold IG DMs
+- PSI audits: Lighthouse local queue, max 4 concurrent by default (`LIGHTHOUSE_MAX_CONCURRENT`)
+
+## Code Standards
+- Touch targets ≥ 44px on mobile (`min-h-11`, `min-w-11`)
+- Use `{ data, error }` or typed API responses with `success` boolean
+- Match existing Tailwind patterns: slate/indigo/emerald palette, rounded-xl cards
+- Prefer minimal diffs — one phase at a time per TODO.md
+
+## When Adding Features
+1. Update TODO.md step status (⬜ → 🟡 → ✅)
+2. Add env vars to `.env.example` with comments
+3. Document new API routes in README.md
+4. Wire SystemMetrics when adding external API integrations
