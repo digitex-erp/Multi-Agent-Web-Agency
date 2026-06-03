@@ -1,10 +1,16 @@
 /**
  * Vercel serverless entry — loads the bundled Express app from dist/server.cjs.
- * Uses .cjs because package.json has "type": "module" (require() not allowed in .js).
+ * ESM entry (package.json type: module) uses createRequire to load the CJS bundle.
  */
-const path = require('path');
-const fs = require('fs');
-const express = require('express');
+import path from 'node:path';
+import fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
+import express from 'express';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const require = createRequire(import.meta.url);
 
 function loadApp() {
   const serverPath = path.join(__dirname, '..', 'dist', 'server.cjs');
@@ -42,4 +48,4 @@ try {
   });
 }
 
-module.exports = app;
+export default app;
